@@ -1,0 +1,174 @@
+<!-- templates/index.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow">
+            <div class="card-body text-center">
+                <i class="fab fa-spotify spotify-logo" style="font-size: 4rem;"></i>
+                <h1 class="card-title mt-3">Spotify Playlist Extractor</h1>
+                <p class="card-text text-muted">Export your Spotify playlists and liked songs as text files</p>
+                
+                <!-- Status indicators -->
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <div class="card {{ 'border-success' if credentials_set else 'border-warning' }}">
+                            <div class="card-body">
+                                <i class="fas fa-key fa-2x {{ 'text-success' if credentials_set else 'text-warning' }}"></i>
+                                <h5 class="mt-2">Credentials</h5>
+                                <span class="badge {{ 'bg-success' if credentials_set else 'bg-warning' }}">
+                                    {{ 'Configured' if credentials_set else 'Not Set' }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card {{ 'border-success' if spotify_connected else 'border-secondary' }}">
+                            <div class="card-body">
+                                <i class="fab fa-spotify fa-2x {{ 'text-success' if spotify_connected else 'text-secondary' }}"></i>
+                                <h5 class="mt-2">Spotify Connection</h5>
+                                <span class="badge {{ 'bg-success' if spotify_connected else 'bg-secondary' }}">
+                                    {{ 'Connected' if spotify_connected else 'Not Connected' }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="mt-4">
+                    {% if not credentials_set %}
+                    <button class="btn btn-primary btn-lg" data-bs-toggle="modal" data-bs-target="#credentialsModal">
+                        <i class="fas fa-cog me-2"></i>Set Up Spotify Credentials
+                    </button>
+                    <div class="mt-3">
+                        <a href="#" class="text-decoration-none" data-bs-toggle="modal" data-bs-target="#helpModal">
+                            <i class="fas fa-question-circle me-1"></i>How to get Spotify credentials?
+                    </a>
+                    </div>
+                    {% elif not spotify_connected %}
+                    <a href="{{ url_for('spotify_auth') }}" class="btn spotify-green btn-lg text-white">
+                        <i class="fab fa-spotify me-2"></i>Connect to Spotify
+                    </a>
+                    {% else %}
+                    <a href="{{ url_for('dashboard') }}" class="btn spotify-green btn-lg text-white">
+                        <i class="fas fa-music me-2"></i>View Your Playlists
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Credentials Modal -->
+<div class="modal fade" id="credentialsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Set Up Spotify Credentials</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('setup_credentials') }}">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="client_id" class="form-label">Client ID</label>
+                        <input type="text" class="form-control" id="client_id" name="client_id" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="client_secret" class="form-label">Client Secret</label>
+                        <input type="password" class="form-control" id="client_secret" name="client_secret" required>
+                    </div>
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Your credentials will be saved locally in a .env file
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Credentials</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Help Modal -->
+<div class="modal fade" id="helpModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">How to Get Spotify Credentials</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <ol>
+                    <li class="mb-3">
+                        <strong>Go to Spotify Developer Dashboard:</strong><br>
+                        <a href="https://developer.spotify.com/dashboard" target="_blank" class="btn btn-sm btn-outline-primary mt-1">
+                            <i class="fas fa-external-link-alt me-1"></i>Open Dashboard
+                        </a>
+                    </li>
+                    <li class="mb-3">
+                        <strong>Log in</strong> with your Spotify account
+                    </li>
+                    <li class="mb-3">
+                        <strong>Click "Create App"</strong>
+                        <ul class="mt-2">
+                            <li>App Name: "My Playlist Extractor" (or any name)</li>
+                            <li>App Description: "Extract my playlists"</li>
+                            <li>Redirect URI: <code>http://127.0.0.1:5000/callback</code></li>
+                            <li>Check "Web API" under "Which API/SDKs are you planning to use?"</li>
+                        </ul>
+                    </li>
+                    <li class="mb-3">
+                        <strong>Click "Save"</strong> and then open your new app
+                    </li>
+                    <li class="mb-3">
+                        <strong>Go to "Settings"</strong> in your app
+                    </li>
+                    <li class="mb-3">
+                        <strong>Copy your Client ID and Client Secret</strong> from the app settings page
+                    </li>
+                </ol>
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Keep your Client Secret private! Don't share it with anyone.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Auto-close credentials modal when page loads with success message
+document.addEventListener('DOMContentLoaded', function() {
+    // Check if there's a success message and close the modal
+    const alerts = document.querySelectorAll('.alert-success');
+    if (alerts.length > 0) {
+        // Close any open modals
+        const modals = document.querySelectorAll('.modal.show');
+        modals.forEach(modal => {
+            const bsModal = bootstrap.Modal.getInstance(modal);
+            if (bsModal) {
+                bsModal.hide();
+            }
+        });
+    }
+});
+
+// Form submission handler to close modal on success
+document.getElementById('credentialsModal').addEventListener('submit', function(e) {
+    // Let the form submit normally, but prepare to close modal
+    setTimeout(() => {
+        const modal = bootstrap.Modal.getInstance(document.getElementById('credentialsModal'));
+        if (modal) {
+            modal.hide();
+        }
+    }, 100);
+});
+</script>
+{% endblock %}
