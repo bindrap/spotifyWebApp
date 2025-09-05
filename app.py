@@ -1,24 +1,18 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, send_file
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
 import os
 import re
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from dotenv import load_dotenv, set_key
-from tqdm import tqdm
-import zipfile
-import tempfile
 import threading
 import time
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-change-this'
+app.secret_key = 'your-secret-key-change-this-in-production'
 
 # Global variables for progress tracking
 download_progress = {}
 download_status = {}
-
-# Load environment variables
-load_dotenv()
 
 # Configuration
 REDIRECT_URI = "http://127.0.0.1:5000/callback"
@@ -31,33 +25,49 @@ ENV_FILE = ".env"
 # Ensure directories exist
 os.makedirs(PLAYLIST_DIR, exist_ok=True)
 
+# Load environment variables
+load_dotenv()
+
 def safe_filename(name: str) -> str:
     """Sanitize playlist names into safe filenames"""
     return re.sub(r'[^a-zA-Z0-9_\-]', '_', name).strip("_") + ".txt"
 
 def update_env_file(client_id, client_secret):
     """Update the .env file with new credentials"""
-    set_key(ENV_FILE, "CLIENT_ID", client_id)
-    set_key(ENV_FILE, "CLIENT_SECRET", client_secret)
-    set_key(ENV_FILE, "REDIRECT_URI", REDIRECT_URI)
+    try:
+        set_key(ENV_FILE, "CLIENT_ID", client_id)
+        set_key(ENV_FILE, "CLIENT_SECRET", client_secret)
+        set_key(ENV_FILE, "REDIRECT_URI", REDIRECT_URI)
+        return True
+    except Exception as e:
+        print(f"Error updating .env file: {e}")
+        return False
 
 def get_spotify_client():
     """Get authenticated Spotify client"""
     client_id = os.getenv("CLIENT_ID")
     client_secret = os.getenv("CLIENT_SECRET")
     
-    if not client_id or not client_secret:
+    if not client_id or not client_secret or not client_id.strip() or not client_secret.strip():
         return None
     
     try:
-        sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
+        auth_manager = SpotifyOAuth(
             client_id=client_id,
             client_secret=client_secret,
             redirect_uri=REDIRECT_URI,
             scope=SCOPE,
             cache_path=CACHE_PATH
-        ))
-        # Test the connection
+        )
+        
+        # Check if we have a valid cached token
+        token_info = auth_manager.get_cached_token()
+        if not token_info:
+            return None
+            
+        sp = spotipy.Spotify(auth_manager=auth_manager)
+        
+        # Test the connection by making a simple API call
         sp.current_user()
         return sp
     except Exception as e:
@@ -90,7 +100,7 @@ def export_liked_songs(sp, session_id):
                     results.append(f"{artists} - {title}")
             
             processed += len(tracks)
-            download_progress[session_id] = int((processed / total_results) * 100)
+            download_progress[session_id] = int((processed / total_results) * 100) if total_results > 0 else 100
             offset += LIMIT
         
         # Save to file
@@ -99,7 +109,7 @@ def export_liked_songs(sp, session_id):
             for line in results:
                 f.write(line + "\n")
         
-        download_status[session_id] = f"Completed! Exported {len(results)} liked songs"
+        download_status[session_id] = f"Completed! Exported {len(results)} liked songs to {liked_file}"
         download_progress[session_id] = 100
         
     except Exception as e:
@@ -142,7 +152,7 @@ def export_playlist(sp, playlist_id, playlist_name, session_id):
             for line in results:
                 f.write(line + "\n")
         
-        download_status[session_id] = f"Completed! Exported {len(results)} songs from {playlist_name}"
+        download_status[session_id] = f"Completed! Exported {len(results)} songs from '{playlist_name}' to {filename}"
         download_progress[session_id] = 100
         
     except Exception as e:
@@ -152,7 +162,7 @@ def export_playlist(sp, playlist_id, playlist_name, session_id):
 @app.route('/')
 def index():
     """Main page"""
-    # Force reload environment variables to get latest credentials
+    # Force reload environment variables
     load_dotenv(override=True)
     
     client_id = os.getenv("CLIENT_ID")
@@ -164,6 +174,8 @@ def index():
     if credentials_set:
         sp = get_spotify_client()
         spotify_connected = sp is not None
+    
+    print(f"🔍 Status Check - Credentials: {credentials_set}, Connected: {spotify_connected}")
     
     return render_template('index.html', 
                          credentials_set=credentials_set,
@@ -179,37 +191,86 @@ def setup_credentials():
         flash('Please provide both Client ID and Client Secret', 'error')
         return redirect(url_for('index'))
     
+    # Clear any existing cache to force re-auth with new credentials
+    if os.path.exists(CACHE_PATH):
+        os.remove(CACHE_PATH)
+    
     # Update environment file
-    update_env_file(client_id, client_secret)
+    if update_env_file(client_id, client_secret):
+        # Reload environment variables
+        load_dotenv(override=True)
+        flash('Credentials saved successfully! Now click "Connect to Spotify" to authenticate.', 'success')
+    else:
+        flash('Error saving credentials. Please try again.', 'error')
     
-    # Reload environment variables
-    load_dotenv(override=True)
-    
-    flash('Credentials saved successfully!', 'success')
-    return redirect(url_for('spotify_auth'))
+    return redirect(url_for('index'))
 
 @app.route('/spotify_auth')
 def spotify_auth():
     """Initiate Spotify authentication"""
-    sp = get_spotify_client()
-    if not sp:
+    load_dotenv(override=True)
+    client_id = os.getenv("CLIENT_ID")
+    client_secret = os.getenv("CLIENT_SECRET")
+    
+    if not client_id or not client_secret:
         flash('Please set up your Spotify credentials first', 'error')
         return redirect(url_for('index'))
     
-    # The SpotifyOAuth will handle the redirect automatically
-    try:
-        # This will trigger the auth flow
-        user = sp.current_user()
-        return redirect(url_for('dashboard'))
-    except Exception as e:
-        # If not authenticated, SpotifyOAuth will redirect to Spotify
-        return redirect(url_for('index'))
+    # Create SpotifyOAuth object and get authorization URL
+    auth_manager = SpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=REDIRECT_URI,
+        scope=SCOPE,
+        cache_path=CACHE_PATH
+    )
+    
+    # Get authorization URL and redirect user to Spotify
+    auth_url = auth_manager.get_authorize_url()
+    print(f"🔗 Redirecting to Spotify: {auth_url}")
+    return redirect(auth_url)
 
 @app.route('/callback')
 def callback():
     """Handle Spotify callback"""
-    # The SpotifyOAuth handles the callback automatically
-    return redirect(url_for('dashboard'))
+    load_dotenv(override=True)
+    client_id = os.getenv("CLIENT_ID")
+    client_secret = os.getenv("CLIENT_SECRET")
+    
+    if not client_id or not client_secret:
+        flash('Credentials not found', 'error')
+        return redirect(url_for('index'))
+    
+    # Create SpotifyOAuth object
+    auth_manager = SpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=REDIRECT_URI,
+        scope=SCOPE,
+        cache_path=CACHE_PATH
+    )
+    
+    # Get the authorization code from the callback
+    code = request.args.get('code')
+    if code:
+        try:
+            # Exchange code for access token
+            token_info = auth_manager.get_access_token(code)
+            if token_info:
+                print("✅ Successfully authenticated with Spotify!")
+                flash('Successfully connected to Spotify!', 'success')
+                return redirect(url_for('dashboard'))
+        except Exception as e:
+            print(f"❌ Error during callback: {e}")
+    
+    error = request.args.get('error')
+    if error:
+        print(f"❌ Spotify auth error: {error}")
+        flash(f'Spotify authentication failed: {error}', 'error')
+    else:
+        flash('Failed to connect to Spotify', 'error')
+    
+    return redirect(url_for('index'))
 
 @app.route('/dashboard')
 def dashboard():
@@ -220,9 +281,12 @@ def dashboard():
         return redirect(url_for('index'))
     
     try:
+        # Get user info
         user = sp.current_user()
         user_id = user['id']
         user_name = user['display_name'] or user_id
+        
+        print(f"✅ Successfully loaded dashboard for user: {user_name}")
         
         # Get user's playlists
         playlists = []
@@ -246,12 +310,15 @@ def dashboard():
         # Get liked songs count
         liked_count = sp.current_user_saved_tracks(limit=1)['total']
         
+        print(f"📊 Found {len(playlists)} playlists and {liked_count} liked songs")
+        
         return render_template('dashboard.html', 
                              user_name=user_name,
                              playlists=playlists,
                              liked_count=liked_count)
     
     except Exception as e:
+        print(f"❌ Error loading dashboard: {str(e)}")
         flash(f'Error loading dashboard: {str(e)}', 'error')
         return redirect(url_for('index'))
 
@@ -262,12 +329,13 @@ def download_liked():
     if not sp:
         return jsonify({'error': 'Not authenticated'}), 401
     
-    session_id = str(int(time.time()))
+    session_id = f"liked_{int(time.time())}"
     download_progress[session_id] = 0
     download_status[session_id] = "Starting..."
     
     # Start download in background thread
     thread = threading.Thread(target=export_liked_songs, args=(sp, session_id))
+    thread.daemon = True
     thread.start()
     
     return jsonify({'session_id': session_id})
@@ -283,13 +351,14 @@ def download_playlist(playlist_id):
         playlist = sp.playlist(playlist_id)
         playlist_name = playlist['name']
         
-        session_id = str(int(time.time()))
+        session_id = f"playlist_{playlist_id}_{int(time.time())}"
         download_progress[session_id] = 0
         download_status[session_id] = "Starting..."
         
         # Start download in background thread
         thread = threading.Thread(target=export_playlist, 
                                 args=(sp, playlist_id, playlist_name, session_id))
+        thread.daemon = True
         thread.start()
         
         return jsonify({'session_id': session_id})
@@ -300,9 +369,7 @@ def download_playlist(playlist_id):
 @app.route('/download_all')
 def download_all():
     """Download all playlists and liked songs"""
-    # This would be implemented similarly to individual downloads
-    # but would process all playlists in sequence
-    return jsonify({'message': 'Feature coming soon!'})
+    return jsonify({'message': 'Feature coming soon! For now, please download playlists individually.'}), 200
 
 @app.route('/progress/<session_id>')
 def get_progress(session_id):
@@ -319,16 +386,33 @@ def get_progress(session_id):
 @app.route('/clear_credentials')
 def clear_credentials():
     """Clear stored credentials and cache"""
-    if os.path.exists(ENV_FILE):
+    try:
         # Clear the credentials from .env
-        set_key(ENV_FILE, "CLIENT_ID", "")
-        set_key(ENV_FILE, "CLIENT_SECRET", "")
+        if os.path.exists(ENV_FILE):
+            set_key(ENV_FILE, "CLIENT_ID", "")
+            set_key(ENV_FILE, "CLIENT_SECRET", "")
+        
+        # Remove Spotify auth cache
+        if os.path.exists(CACHE_PATH):
+            os.remove(CACHE_PATH)
+        
+        # Reload environment variables
+        load_dotenv(override=True)
+        
+        flash('Credentials cleared successfully', 'success')
+    except Exception as e:
+        flash(f'Error clearing credentials: {str(e)}', 'error')
     
-    if os.path.exists(CACHE_PATH):
-        os.remove(CACHE_PATH)
-    
-    flash('Credentials cleared successfully', 'success')
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
+    print("🎵 Starting Spotify Playlist Extractor...")
+    print("📁 Creating directories...")
+    os.makedirs(PLAYLIST_DIR, exist_ok=True)
+    print(f"📂 Playlist directory: {os.path.abspath(PLAYLIST_DIR)}")
+    print(f"📄 Environment file: {os.path.abspath(ENV_FILE)}")
+    print("🌐 Starting Flask server...")
+    print("📱 Open your browser and go to: http://127.0.0.1:5000")
+    print("⏹️  Press Ctrl+C to stop the server")
+    print("-" * 50)
     app.run(debug=True, port=5000)

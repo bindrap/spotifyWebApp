@@ -45,7 +45,7 @@
                     <div class="mt-3">
                         <a href="#" class="text-decoration-none" data-bs-toggle="modal" data-bs-target="#helpModal">
                             <i class="fas fa-question-circle me-1"></i>How to get Spotify credentials?
-                    </a>
+                        </a>
                     </div>
                     {% elif not spotify_connected %}
                     <a href="{{ url_for('spotify_auth') }}" class="btn spotify-green btn-lg text-white">
@@ -79,6 +79,11 @@
                     <div class="mb-3">
                         <label for="client_secret" class="form-label">Client Secret</label>
                         <input type="password" class="form-control" id="client_secret" name="client_secret" required>
+                    </div>
+                    <div class="alert alert-warning">
+                        <strong><i class="fas fa-exclamation-triangle me-2"></i>Important:</strong>
+                        Make sure your Spotify app's Redirect URI is set to:<br>
+                        <code>http://127.0.0.1:5000/callback</code>
                     </div>
                     <div class="alert alert-info">
                         <i class="fas fa-info-circle me-2"></i>
@@ -118,7 +123,7 @@
                         <ul class="mt-2">
                             <li>App Name: "My Playlist Extractor" (or any name)</li>
                             <li>App Description: "Extract my playlists"</li>
-                            <li>Redirect URI: <code>http://127.0.0.1:5000/callback</code></li>
+                            <li><strong>Redirect URI: <code>http://127.0.0.1:5000/callback</code></strong> ⚠️ This must be exact!</li>
                             <li>Check "Web API" under "Which API/SDKs are you planning to use?"</li>
                         </ul>
                     </li>
@@ -132,6 +137,10 @@
                         <strong>Copy your Client ID and Client Secret</strong> from the app settings page
                     </li>
                 </ol>
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <strong>Critical:</strong> The Redirect URI must be exactly <code>http://127.0.0.1:5000/callback</code> or authentication will fail!
+                </div>
                 <div class="alert alert-warning">
                     <i class="fas fa-exclamation-triangle me-2"></i>
                     Keep your Client Secret private! Don't share it with anyone.
@@ -146,29 +155,20 @@
 <script>
 // Auto-close credentials modal when page loads with success message
 document.addEventListener('DOMContentLoaded', function() {
-    // Check if there's a success message and close the modal
+    // Check if there's a success message about credentials and close the modal
     const alerts = document.querySelectorAll('.alert-success');
-    if (alerts.length > 0) {
-        // Close any open modals
-        const modals = document.querySelectorAll('.modal.show');
-        modals.forEach(modal => {
-            const bsModal = bootstrap.Modal.getInstance(modal);
-            if (bsModal) {
-                bsModal.hide();
+    alerts.forEach(alert => {
+        if (alert.textContent.includes('Credentials saved successfully')) {
+            // Close the credentials modal if it's open
+            const credentialsModal = document.getElementById('credentialsModal');
+            if (credentialsModal) {
+                const bsModal = bootstrap.Modal.getInstance(credentialsModal);
+                if (bsModal) {
+                    bsModal.hide();
+                }
             }
-        });
-    }
-});
-
-// Form submission handler to close modal on success
-document.getElementById('credentialsModal').addEventListener('submit', function(e) {
-    // Let the form submit normally, but prepare to close modal
-    setTimeout(() => {
-        const modal = bootstrap.Modal.getInstance(document.getElementById('credentialsModal'));
-        if (modal) {
-            modal.hide();
         }
-    }, 100);
+    });
 });
 </script>
 {% endblock %}
